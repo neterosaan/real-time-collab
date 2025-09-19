@@ -1,0 +1,5 @@
+# For Node.js dependencies - these can be re-installed
+node_modules/
+
+# For secret keys and passwords - NEVER commit this!
+.env
