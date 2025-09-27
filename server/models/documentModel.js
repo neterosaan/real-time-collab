@@ -1,6 +1,8 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/mysql');
 const AppError = require('../utils/appError');
+const DocumentContent = require('./documentContentModel'); // <-- The new line
+
 
 /**
  * Creates a new document and assigns ownership in a transaction.
@@ -27,6 +29,8 @@ exports.create = async (title, ownerId) => {
       'INSERT INTO user_document_permissions (user_id, document_id, role_id) VALUES (?, ?, ?)',
       [ownerId, newDocumentId, ownerRoleId]
     );
+
+    await DocumentContent.create({_id: newDocumentId, content:''})
 
     await connection.commit();
 

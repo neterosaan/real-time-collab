@@ -1,7 +1,7 @@
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const documentModel = require('../models/documentModel')
-
+const DocumentContent = require('../models/documentContentModel')
 
 
 exports.createDocument = catchAsync(async (req, res, next) => {
@@ -113,5 +113,33 @@ exports.deleteDocument = catchAsync(async (req, res, next) => {
   res.status(204).json({
     status: 'success',
     data: null,
+  });
+});
+
+
+
+exports.getDocumentContent = catchAsync(async (req, res, next) => {
+  const documentId = req.params.id;
+  const userId = req.user.id;
+
+  // Step 1: AUTHORIZATION - Check if the user has access to this document in MySQL.
+  const hasAccess = await documentModel.findById(documentId, userId);
+  if (!hasAccess) {
+    return next(new AppError('You do not have permission to access this document.', 403));
+  }
+
+  // Step 2: FETCH CONTENT - Get the content from MongoDB.
+  const documentContent = await DocumentContent.findById(documentId);
+  if (!documentContent) {
+    // This case should not happen if your create logic is working.
+    return next(new AppError('Document content not found in the database.', 404));
+  }
+
+  // Step 3: SEND RESPONSE
+  res.status(200).json({
+    status: 'success',
+    data: {
+      content: documentContent,
+    },
   });
 });

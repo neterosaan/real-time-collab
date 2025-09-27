@@ -20,4 +20,8 @@ router
   .patch(documentController.updateDocument)
   .delete(documentController.deleteDocument); // We will add specific authorization for this later
 
+router
+.route('/:id/content')
+.get(documentController.getDocumentContent)
+
 module.exports = router;
