@@ -2,8 +2,8 @@
 const app = require('./app')
 const http = require('http')
 // 1. CHANGE HERE: We only need to import the pool to initialize it.
+const { connectToRedis } = require('./db/redis'); // <<< IMPORT THIS
 const connectToMongoDB = require('./db/mongo');
-const { createClient } = require('redis');
 const initializeSocket = require('./socket/socketHandler');
 const { Server} = require('socket.io')
 
@@ -28,20 +28,6 @@ initializeSocket(io);
 // --- Database Connections ---
 
 
-async function connectToRedis() {
-  const redisClient = createClient({
-    url: `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
-  });
-  redisClient.on('error', (err) => console.error('❌ Redis Client Error', err));
-  try {
-    await redisClient.connect();
-    console.log('✅ Successfully connected to Redis.');
-    return redisClient;
-  } catch (error) {
-    console.error('❌ Could not connect to Redis:', error);
-    process.exit(1);
-  }
-}
 
 
 // --- Start Server ---

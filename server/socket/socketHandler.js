@@ -3,6 +3,7 @@ const { promisify } = require('util');
 const DocumentContent = require('../models/documentContentModel');
 const documentModel = require('../models/documentModel'); // For authorization
 const db = require('../db/mysql');
+const { getRedisClient } = require('../db/redis'); // <<< 1. IMPORT our Redis getter
 const AppError = require('../utils/appError');
 
 
@@ -57,6 +58,16 @@ console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.i
         // Listen for the 'joinDocument' event
     socket.on('joinDocument', async (documentId) => {
       try {
+        // 1. If the user was already in a document, make them leave that old room.
+        if (socket.currentDocumentId) {
+            socket.leave(socket.currentDocumentId); 
+            console.log(`User left room: ${socket.currentDocumentId}`);
+          }
+
+
+        socket.removeAllListeners('sendChanges');
+        socket.removeAllListeners('saveDocument');
+        socket.removeAllListeners('sendChatMessage');
 
         // هنشوف دلوقتي الدوكيمنت و اليوزر عندهم علاقة ببعض يعني أكسيس؟ ولا لا
           const hasAccess = await documentModel.findById(documentId, socket.user.id);
@@ -90,11 +101,43 @@ console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.i
         //    'socket.emit()' sends a message only to this specific socket.
         socket.emit('loadDocument', document.content);
 
-         // ===================================================================
-        // <<< NEW: Clean up previous listeners to prevent duplicates >>>
-        socket.removeAllListeners('sendChanges');
-        socket.removeAllListeners('saveDocument');
-        // ===================================================================
+        try{
+
+          const redisClient = getRedisClient();
+          const chatKey = `chat:${socket.currentDocumentId}`
+          const history = await redisClient.lRange(chatKey,-50,-1)
+          const parsedHistory = history.map(item => JSON.parse(item));
+
+          socket.emit('loadChatHistory', parsedHistory);
+
+        }catch(error){
+          console.error('Error loading chat history from Redis:', error);
+          socket.emit('chatError', { message: 'Could not load chat history.' });
+        }
+        
+        socket.on('sendChatMessage', async(messageContent)=>{
+          if (!messageContent || !socket.currentDocumentId) return;
+              const message = {
+                  username: socket.user.username,
+                  content: messageContent,
+                  timestamp: new Date().toISOString(),
+              };
+
+              try{
+                const redisClient = getRedisClient();
+                const chatKey = `chat:${socket.currentDocumentId}`
+
+                await redisClient.rPush(chatKey, JSON.stringify(message));
+                
+                await redisClient.lTrim(chatKey, -100, -1);
+
+                io.to(socket.currentDocumentId).emit('receiveChatMessage', message);
+
+              }catch(error){
+                console.error('Error saving/broadcasting chat message:', error);
+                socket.emit('chatError', { message: 'Could not send message.' });
+              }
+        })
 
         socket.on('sendChanges',(delta)=>{
 
