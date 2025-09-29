@@ -54,7 +54,7 @@ module.exports=function initializeSocket(io) {
   io.use(socketProtect);
   // This is the main connection event. Everything happens inside here.
   io.on('connection', (socket) => {
-console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.id})`);
+  console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.id})`);
         // Listen for the 'joinDocument' event
     socket.on('joinDocument', async (documentId) => {
       try {
@@ -102,7 +102,7 @@ console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.i
         socket.emit('loadDocument', document.content);
 
         try{
-
+        // هنعمل list هنا للشات هيستوري
           const redisClient = getRedisClient();
           const chatKey = `chat:${socket.currentDocumentId}`
           const history = await redisClient.lRange(chatKey,-50,-1)
@@ -113,6 +113,23 @@ console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.i
         }catch(error){
           console.error('Error loading chat history from Redis:', error);
           socket.emit('chatError', { message: 'Could not load chat history.' });
+        }
+
+        // هنعمل set هنا للاونلاين 
+        try{
+          
+          const redisClient=getRedisClient();
+          const presenceKey = `presence:${socket.currentDocumentId}`;
+          const userId= socket.user.username;
+
+          await redisClient.sAdd(presenceKey,userId)
+
+          const onlineUsers=await redisClient.sMembers(presenceKey)
+
+          io.to(socket.currentDocumentId).emit('updatePresence', onlineUsers);
+
+        }catch(error){
+         console.error('Error updating presence on join:', error);
         }
         
         socket.on('sendChatMessage', async(messageContent)=>{
@@ -171,8 +188,31 @@ console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.i
     });
 
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect',async () => {
       console.log(`👋 User disconnected: ${socket.user.username}`);
+
+
+      // We need to check if the user was in a document room when they disconnected
+      if (socket.currentDocumentId) {
+        try {
+          const redisClient = getRedisClient();
+          const presenceKey = `presence:${socket.currentDocumentId}`;
+          const userIdentifier = socket.user.username;
+
+          // Remove the user from the presence Set
+          await redisClient.sRem(presenceKey, userIdentifier);
+
+          // Get the new, smaller list of online users
+          const onlineUsers = await redisClient.sMembers(presenceKey);
+
+          // Broadcast the updated list to the REMAINING users in the room
+          // We use socket.broadcast here because the disconnected user can't receive it anyway
+          socket.broadcast.to(socket.currentDocumentId).emit('updatePresence', onlineUsers);
+
+        } catch (error) {
+          console.error('Error updating presence on disconnect:', error);
+        }
+      }
     });
   });
 };
