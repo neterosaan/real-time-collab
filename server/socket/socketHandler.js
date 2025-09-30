@@ -57,6 +57,7 @@ module.exports=function initializeSocket(io) {
   console.log(`🔌 User connected: ${socket.user.username} (Socket ID: ${socket.id})`);
         // Listen for the 'joinDocument' event
     socket.on('joinDocument', async (documentId) => {
+        console.log('--- DEBUG: joinDocument handler started ---'); // Log 1
       try {
         // 1. If the user was already in a document, make them leave that old room.
         if (socket.currentDocumentId) {
@@ -68,19 +69,26 @@ module.exports=function initializeSocket(io) {
         socket.removeAllListeners('sendChanges');
         socket.removeAllListeners('saveDocument');
         socket.removeAllListeners('sendChatMessage');
+    console.log('--- DEBUG: Step 1 -> Fetching user role...'); // Log 2
 
         // هنشوف دلوقتي الدوكيمنت و اليوزر عندهم علاقة ببعض يعني أكسيس؟ ولا لا
-          const hasAccess = await documentModel.findById(documentId, socket.user.id);
-          if (!hasAccess) {
-          socket.emit('documentError', { message: 'Authorization Failed: You do not have access to this document.' });
-          socket.disconnect(true);
-          return;
-        }
+      const role = await documentModel.getUserRole(documentId, socket.user.id);
+              console.log('--- DEBUG: Step 2 -> User role fetched:', role); // Log 3
 
-        socket.currentDocumentId= documentId
+      if (!role) { // If getUserRole returns null, they have no access.
+              console.log('--- DEBUG: Authorization FAILED. User has no role.'); // Log 4
+        socket.emit('documentError', { message: 'Authorization Failed: You do not have access to this document.' });
+        socket.disconnect(true);
+        return;
+      }
+      
+      // Store the user's role for this session.
+      socket.currentRole = role.name;
+
+      socket.currentDocumentId= documentId
 
       socket.join(documentId);
-      console.log(`User ${socket.user.username} joined document room: ${documentId}`);
+      console.log(`User ${socket.user.username} joined document room: ${documentId} with role: ${socket.currentRole}`);
 
       // --- NEW LOGIC ---
 
@@ -156,27 +164,49 @@ module.exports=function initializeSocket(io) {
               }
         })
 
-        socket.on('sendChanges',(delta)=>{
+        socket.on('sendChanges', async (delta) => {
+  console.log('\n--- NEW "sendChanges" EVENT ---');
+  console.log(`FROM: User: ${socket.user.username} (Role: ${socket.currentRole})`);
+  console.log(`IN_ROOM: ${socket.currentDocumentId}`);
 
-          socket.broadcast.to(socket.currentDocumentId).emit('receiveChanges',delta)
-        })
+  if (socket.currentRole === 'viewer') {
+    console.log(` > ACTION: REJECTED (User is a viewer)`);
+    return;
+  }
+  if (!socket.currentDocumentId) {
+    console.log(` > ACTION: REJECTED (socket.currentDocumentId is missing)`);
+    return;
+  }
+
+  // THIS IS THE MOST IMPORTANT PART
+  const socketsInRoom = await io.in(socket.currentDocumentId).fetchSockets();
+  console.log(` > ROOM_STATE: Found ${socketsInRoom.length} client(s) in this room.`);
+  socketsInRoom.forEach(s => {
+    console.log(`   - Client Details: Socket ID=${s.id}, User=${s.user.username}`);
+  });
+
+  console.log(` > ACTION: Broadcasting 'receiveChanges' to ${socketsInRoom.length - 1} other client(s).`);
+  socket.broadcast.to(socket.currentDocumentId).emit('receiveChanges', delta);
+  console.log('--- EVENT COMPLETE ---\n');
+});
 
 
-        socket.on('saveDocument',async(content)=>{
-          try{
-            await DocumentContent.findByIdAndUpdate(socket.currentDocumentId, { content });
-            // Optional: You could emit a confirmation back to the saving client
-            socket.emit('documentSaved', { message: 'Document saved successfully!' });
-
-          }catch (error) {
-            console.error('Error saving document:', error);
-            socket.emit('saveError', { message: 'Failed to save document.' });
+ socket.on('saveDocument',async(content)=>{
+        if (socket.currentRole === 'viewer') {
+        socket.emit('saveError', { message: 'Could not save.' });
+        return; // Silently ignore the change
         }
-      })
+        try{
+        await DocumentContent.findByIdAndUpdate(socket.currentDocumentId, { content });
+        // Optional: You could emit a confirmation back to the saving client
+        socket.emit('documentSaved', { message: 'Document saved successfully!' });
+        }catch (error) {
+        console.error('Error saving document:', error);
+        socket.emit('saveError', { message: 'Failed to save document.' });
+    }
+  })
 
-
-
-        
+      
       } catch (error) {
         // --- ERROR HANDLING 2: General database error ---
         const errorMessage = `Error fetching document content for ID ${documentId}: ${error.message}`;

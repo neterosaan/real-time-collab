@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 const db = require('../db/mysql');
-
+const documentModel = require('../models/documentModel');
 
 
 const signToken = (id)=>{
@@ -246,3 +246,23 @@ exports.restrictTo = (...roles) => {
   }
 )
 }
+
+exports.isOwner = catchAsync(async (req, res, next) => {
+  const documentId = req.params.id;
+  // This is the ID of the person making the request
+  const requestingUserId = req.user.id; 
+
+  // Call your model function and store the result in a correctly named variable
+  const ownerId = await documentModel.findOwner(documentId);
+
+  // Now, use the correct variable names in the comparison
+  if (!ownerId || ownerId !== requestingUserId) {
+    return next(new AppError('You are not the owner of this document, you cannot perform this action.', 403));
+  }
+
+  // Since we are only fetching the ownerId, we cannot attach the full document.
+  // We will remove the req.document line for this implementation.
+
+  // The check passed! The user is the owner.
+  next();
+});
