@@ -34,6 +34,7 @@ CREATE TABLE `roles` (
 
 -- 3. DOCUMENTS table with corrected foreign key type.
 CREATE TABLE `documents` (
+  `is_public` BOOLEAN NOT NULL DEFAULT FALSE, -- <<< ADD THIS LINE
   `id` VARCHAR(36) NOT NULL PRIMARY KEY, -- It's best practice to use UUIDs for document IDs too.
   `title` VARCHAR(255) NOT NULL DEFAULT 'Untitled Document',
   `owner_id` VARCHAR(36) NOT NULL,      -- IMPORTANT: Changed from INT to VARCHAR(36) to match users.id
@@ -75,3 +76,20 @@ INSERT INTO `roles` (`id`, `name`) VALUES
 SELECT 'Database schema successfully recreated!' AS status;
 
 -- --- END OF SCRIPT ---
+CREATE TABLE document_invitations (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `document_id` VARCHAR(36) NOT NULL,
+    `inviter_id` VARCHAR(36) NOT NULL,
+    `invitee_id` VARCHAR(36) NOT NULL,
+    `role_id` INT NOT NULL,
+    `status` ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (`document_id`) REFERENCES `documents`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`inviter_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`invitee_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`),
+    
+    UNIQUE KEY `unique_invitation` (`document_id`, `invitee_id`)
+) ENGINE=InnoDB;

@@ -200,3 +200,104 @@ exports.isPublic = async (documentId) => {
   // Return true if the document exists and is_public is true (1), otherwise false.
   return rows[0] ? !!rows[0].is_public : false;
 };
+
+
+exports.createInvitation = async (documentId, inviterId, inviteeId, roleId) => {
+  const sql = `
+    INSERT INTO document_invitations (document_id, inviter_id, invitee_id, role_id)
+    VALUES (?, ?, ?, ?)
+  `;
+  try {
+    const [result] = await db.execute(sql, [documentId, inviterId, inviteeId, roleId]);
+    return {
+      invitationId: result.insertId,
+      documentId,
+      inviteeId,
+      roleId,
+    };
+  } catch (error) {
+    // Check for the unique constraint violation error (code 1062 in MySQL)
+    if (error.code === 'ER_DUP_ENTRY') {
+      // This is not a server error, it's a user error.
+      throw new AppError('An invitation for this user on this document already exists.', 409); // 409 Conflict
+    }
+    // Re-throw any other unexpected database errors
+    throw error;
+  }
+};
+
+exports.getInvitationsForUser = async (userId) => {
+  const sql = `
+    SELECT i.id, i.document_id, d.title, u.username AS inviter_name, r.name AS role_name
+    FROM document_invitations i
+    JOIN documents d ON i.document_id = d.id
+    JOIN users u ON i.inviter_id = u.id
+    JOIN roles r ON i.role_id = r.id
+    WHERE i.invitee_id = ? AND i.status = 'pending'
+  `;
+  const [invitations] = await db.execute(sql, [userId]);
+  return invitations;
+};
+
+
+// Add to src/models/documentModel.js
+
+exports.acceptInvitation = async (invitationId, userId) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Find the invitation and lock the row for the transaction.
+    // search with userid and inivtationid to make sure its user invitation
+    const [invites] = await connection.execute(
+      'SELECT * FROM document_invitations WHERE id = ? AND invitee_id = ? AND status = "pending" FOR UPDATE',
+      [invitationId, userId]
+    );
+    const invitation = invites[0];
+
+    if (!invitation) {
+      throw new AppError('Invitation not found, already acted upon, or you are not the invitee.', 404);
+    }
+
+    // 2. Add the permission.
+    await connection.execute(
+      'INSERT INTO user_document_permissions (document_id, user_id, role_id) VALUES (?, ?, ?)',
+      [invitation.document_id, invitation.invitee_id, invitation.role_id]
+    );
+
+    // 3. Update the invitation status.
+    await connection.execute(
+      'UPDATE document_invitations SET status = "accepted" WHERE id = ?',
+      [invitationId]
+    );
+
+    await connection.commit();
+    return invitation; // Return the invitation details on success
+  } catch (error) {
+    await connection.rollback();
+    // Handle potential duplicate permission if a race condition occurs
+    if (error.code === 'ER_DUP_ENTRY') {
+      throw new AppError('You already have permission for this document.', 409);
+    }
+    throw error; // Re-throw other errors
+  } finally {
+    connection.release();
+  }
+};
+
+
+exports.declineInvitation = async (invitationId, userId) => {
+  // This query is very specific: it will only update a row if the ID matches,
+  // the user is the correct invitee, AND the status is still 'pending'.
+  const sql = `
+    UPDATE document_invitations
+    SET status = 'declined'
+    WHERE id = ? AND invitee_id = ? AND status = 'pending'
+  `;
+
+  const [result] = await db.execute(sql, [invitationId, userId]);
+
+  // result.affectedRows will be 1 if the update was successful.
+  // It will be 0 if no matching row was found (already acted upon, wrong user, etc.).
+  return result;
+};

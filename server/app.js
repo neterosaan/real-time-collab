@@ -6,6 +6,7 @@ const globalErrorHandler = require('./controllers/errorController')
 const AppError = require('./utils/appError')
 const userRouter =require('./routes/userRoutes');
 const documentRouter = require('./routes/documentRoutes')
+const invitationRouter = require('./routes/invitationRoutes'); // <<< IMPORT THIS
 const app = express();
 
 // --- Middleware ---
@@ -24,6 +25,7 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', userRouter);
 app.use('/api/documents',documentRouter)
+app.use('/api/invitations', invitationRouter); // <<< ADD THIS LINE
 
 app.use((req, res, next) => {
     console.log('--- 404 HANDLER TRIGGERED ---'); // <-- ADD THIS LINE

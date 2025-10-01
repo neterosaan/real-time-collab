@@ -149,7 +149,7 @@ exports.shareDocument = catchAsync(async (req, res, next) => {
   // 1. Get data from the request
   const documentId = req.params.id;
   const { email} = req.body;
-  const ownerId = req.user.id;
+  const inviterId = req.user.id;
 
   // 2. Validate input
   if (!email) {
@@ -173,19 +173,28 @@ exports.shareDocument = catchAsync(async (req, res, next) => {
   }
   
   // 4. Prevent owner from sharing with themselves
-  if (userToInvite.id === ownerId) {
+  if (userToInvite.id === inviterId) {
     return next(new AppError('You cannot share a document with yourself.', 400));
   }
 
   // 5. Add the permission to the database using our new model function
-  const permission = await documentModel.addPermission(documentId, userToInvite.id,editorRoleId);
+  const invitation = await documentModel.createInvitation(
+    documentId,
+    inviterId,
+    userToInvite.id,
+    editorRoleId // We use the 'editor' role ID we found earlier
+  );
 
   // 6. Send success response
-  res.status(200).json({
-    status: 'success',
-    message: `Document successfully shared with ${userToInvite.username}.`,
-    data: {
-      permission,
+res.status(200).json({ // <-- Small improvement: should be 201 Created
+  status: 'success',
+  // You updated the message here in your head, but not in the code yet
+  message: `Document successfully shared with ${userToInvite.username}.`, 
+  data: {
+    // THE BUG IS HERE:
+    // You are trying to send a variable named 'permission',
+    // but the variable you created is named 'invitation'.
+    invitation, 
     },
   });
 });
